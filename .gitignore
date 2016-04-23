@@ -1,2 +1,4 @@
 project.o # So we're not constantly uploading binaries
 .ycm_extra_conf.py # For Greg's benefit, mostly
+vgcore* # Valgrind binaries
+*.png # Images
