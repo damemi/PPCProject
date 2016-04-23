@@ -8,24 +8,27 @@
 #include <cv.h>
 #include <highgui.h>
 
+// Because I'm sick of typing cv::
+using namespace cv;
+
 /***************************************************************************/
 /* Global Vars *************************************************************/
 /***************************************************************************/
 
 // TODO: Matrix rows
 // TODO: Class for pixels
-unsigned int **g_matrix = NULL;
-unsigned int **g_sorted_matrix = NULL;
+unsigned int ***g_matrix = NULL;
+unsigned int ***g_sorted_matrix = NULL;
 
 unsigned int height = 0;
 unsigned int width = 0;
-unsigned int step = 0;
-unsigned int channels = 0;
 
 unsigned int g_start_row = 0;
 unsigned int g_end_row = 0;
 
 unsigned int g_output_type = 1;
+
+Mat img;
 
 /***************************************************************************/
 /* Function Decs ***********************************************************/
@@ -33,7 +36,9 @@ unsigned int g_output_type = 1;
 
 unsigned int ***allocate_matrix(unsigned int, unsigned int, unsigned int); // Allocate space for the matrix
 unsigned int z_generator(unsigned int, unsigned int, unsigned int); // A helper function to calculate the z-curve value given RGB values
-void init_matrix(int); // Take data from the image and store it to our rows
+void init_matrix(Mat&); // Take data from the image and store it to our rows
+void quicksort_serial(unsigned int, unsigned int);
+Mat& save_img(Mat&); // Store the data from the matrix back into the image
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -41,63 +46,50 @@ void init_matrix(int); // Take data from the image and store it to our rows
 
 int main(int argc, char *argv[])
 {
-  IplImage* img = 0; 
-  uchar *data;
-  int i,j,k;
+  /* int i,j,k; */
 
-  if(argc<2){
-    printf("Usage: main <image-file-name>\n\7");
+  if(argc<3){
+    printf("Usage: main <image-file-name> <output-file-name>\n\7");
     exit(0);
   }
 
   // load an image  
-  img=cvLoadImage(argv[1],1);
-  if(!img){
+  img = imread(argv[1], CV_LOAD_IMAGE_COLOR);
+  if(!img.data){
     printf("Could not load image file: %s\n",argv[1]);
     exit(0);
   }
 
   // get the image data
-  height    = img->height;
-  width     = img->width;
-  step      = img->widthStep;
-  channels  = img->nChannels;
-  if (channels != 3)
-  {
-    printf("Not an RGB image\n");
-    exit(0);
-  }
-  data      = (uchar *)img->imageData;
-  printf("Processing a %dx%d image with %d channels\n",height,width,channels); 
+  height    = img.rows;
+  width     = img.cols;
 
   // create a window
-  /* cvNamedWindow("mainWin", CV_WINDOW_AUTOSIZE); */ 
+  /* namedWindow("mainWin", CV_WINDOW_AUTOSIZE); */ 
   /* cvMoveWindow("mainWin", 100, 100); */
 
-  // 
+  /* std::cout << z_generator(0,255,255) << std::endl; */
+  g_matrix = allocate_matrix(height, width, 4);
+  /* g_matrix[height - 1][width - 1][3] = 12; */
+  /* std::cout << g_matrix[height - 1][width - 1][3] << std::endl; */
+  init_matrix(img);
+  quicksort_serial(0, height*width - 1);
+  /* for (unsigned int i = 0; i < height; i++) */
+  /* { */
+  /*   for (unsigned int j = 0; j < width; j++) */
+  /*   { */
+  /*     std::cout << "(" << g_matrix[i][j][0] << ", " << g_matrix[i][j][1] << ", " << g_matrix[i][j][2] << ") z = " << g_matrix[i][j][3] << std::endl; */
+  /*   } */
+  /* } */
+  
+  img = save_img(img);
+  imwrite(argv[2], img);
 
-  // invert the image
-  for(i=0;i<height;i++)
-  {
-    for(j=0;j<width;j++)
-    {
-      for(k=0;k<channels;k++)
-      {
-	data[i*step+j*channels+k]=255-data[i*step+j*channels+k];
-      }
-    }
-  }
+  /* // show the image */
+  /* imshow("mainWin", img); */
 
-  std::cout << z_generator(0,255,255) << std::endl;
-
-  // show the image
-  /* cvShowImage("mainWin", img ); */
-
-  // wait for a key
-  /* cvWaitKey(0); */
-
-  // release the image
-  /* cvReleaseImage(&img ); */
+  /* // wait for a key */
+  /* waitKey(0); */
 
   return 0;
 }
@@ -180,7 +172,113 @@ unsigned int z_generator(unsigned int R, unsigned int G, unsigned int B)
 /* Function: Init Matrix ***************************************************/
 /***************************************************************************/
 
-void init_matrix() //int myrank, int commsize)
+void init_matrix(Mat& I)
 {
+  unsigned int curr_x = 0;
+  unsigned int curr_y = 0;
+  unsigned int i = 1;
+  unsigned int r, g, b, z;
+  // accept only char type matrices
+  CV_Assert(I.depth() == CV_8U);
 
+  MatIterator_<Vec3b> it, end;
+  for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  {
+    r = (*it)[0];
+    g = (*it)[1];
+    b = (*it)[2];
+    z = z_generator(r, g, b);
+    curr_y = (i - 1) / width;
+    curr_x = (i - 1) % width;
+    g_matrix[curr_y][curr_x][0] = r;
+    g_matrix[curr_y][curr_x][1] = g;
+    g_matrix[curr_y][curr_x][2] = b;
+    g_matrix[curr_y][curr_x][3] = z;
+
+    /* (*it)[0] = table[(*it)[0]]; */
+    /* (*it)[1] = table[(*it)[1]]; */
+    /* (*it)[2] = table[(*it)[2]]; */
+  }
+}
+
+/***************************************************************************/
+/* Function: Quicksort - Serial ********************************************/
+/***************************************************************************/
+
+// This function heavily based on code from:
+// http://www.algolist.net/Algorithms/Sorting/Quicksort
+void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
+{
+  unsigned int i = left_bound, j = right_bound;
+  unsigned int tmp_r, tmp_g, tmp_b, tmp_z;
+  unsigned int middle = (left_bound + right_bound) / 2;
+  unsigned int pivot = g_matrix[middle / width][middle % width][3];
+
+  /* partition */
+
+  while (i < j)
+  {
+    while (g_matrix[i / width][i % width][3] < pivot)
+    {
+      i++;
+    }
+    while (g_matrix[j / width][j % width][3] > pivot)
+    {
+      j--;
+    }
+    if (i <= j)
+    {
+      tmp_r = g_matrix[i / width][i % width][0];
+      tmp_g = g_matrix[i / width][i % width][1];
+      tmp_b = g_matrix[i / width][i % width][2];
+      tmp_z = g_matrix[i / width][i % width][3];
+      g_matrix[i / width][i % width][0] = g_matrix[j / width][j % width][0];
+      g_matrix[i / width][i % width][1] = g_matrix[j / width][j % width][1];
+      g_matrix[i / width][i % width][2] = g_matrix[j / width][j % width][2];
+      g_matrix[i / width][i % width][3] = g_matrix[j / width][j % width][3];
+      g_matrix[j / width][j % width][0] = tmp_r;
+      g_matrix[j / width][j % width][1] = tmp_g;
+      g_matrix[j / width][j % width][2] = tmp_b;
+      g_matrix[j / width][j % width][3] = tmp_z;
+      i++;
+      j--;
+    }
+  };
+
+  /* recursion */
+
+  if (left_bound < j)
+  {
+    quicksort_serial(left_bound, j);
+  }
+  if (i < right_bound)
+  {
+    quicksort_serial(i, right_bound);
+  }
+}
+
+/***************************************************************************/
+/* Function: Save Image ****************************************************/
+/***************************************************************************/
+
+Mat& save_img(Mat& I)
+{
+  unsigned int curr_x = 0;
+  unsigned int curr_y = 0;
+  unsigned int i = 1;
+  // accept only char type matrices
+  CV_Assert(I.depth() == CV_8U);
+
+  MatIterator_<Vec3b> it, end;
+  for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  {
+    curr_y = (i - 1) / width;
+    curr_x = (i - 1) % width;
+
+    (*it)[0] = g_matrix[curr_y][curr_x][0];
+    (*it)[1] = g_matrix[curr_y][curr_x][1];
+    (*it)[2] = g_matrix[curr_y][curr_x][2];
+  }
+
+  return I;
 }
