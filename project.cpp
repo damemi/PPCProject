@@ -40,9 +40,9 @@ Mat img;
 
 unsigned int ***allocate_matrix(unsigned int, unsigned int, unsigned int); // Allocate space for the matrix
 unsigned int z_generator(unsigned int, unsigned int, unsigned int); // A helper function to calculate the z-curve value given RGB values
-void init_matrix(Mat&); // Take data from the image and store it to our rows
+void init_matrix(Mat&,int); // Take data from the image and store it to our rows
 void quicksort_serial(unsigned int, unsigned int);
-Mat& save_img(Mat&); // Store the data from the matrix back into the image
+Mat& save_img(Mat&,int); // Store the data from the matrix back into the image
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -85,16 +85,14 @@ int main(int argc, char *argv[])
 
   MPI_Barrier( MPI_COMM_WORLD );
 
-  g_matrix = allocate_matrix(height, width, 4);
-  init_matrix(img);
+  //g_matrix = allocate_matrix(height, width, 4);
+  g_matrix = allocate_matrix(g_numrows, width, 4);
+  init_matrix(img,mpi_myrank);
 
-  //unsigned int i = g_numrows * width * mpi_myrank;
-  //unsigned int j = i + (g_numrows - 1)*width;  
   //quicksort_serial(0, height*width - 1);
-  quicksort_serial(g_numrows * width * mpi_myrank,
-		   (g_numrows * width * mpi_myrank) + (g_numrows-1) * width);
+  quicksort_serial(0, g_numrows*width-1);
   
-  img = save_img(img);
+  img = save_img(img,mpi_myrank);
   if(mpi_myrank == 0)
     imwrite(argv[2], img);
 
@@ -189,7 +187,7 @@ unsigned int z_generator(unsigned int R, unsigned int G, unsigned int B)
 /* Function: Init Matrix ***************************************************/
 /***************************************************************************/
 
-void init_matrix(Mat& I)
+void init_matrix(Mat& I, int mpi_myrank)
 {
   unsigned int curr_x = 0;
   unsigned int curr_y = 0;
@@ -198,23 +196,35 @@ void init_matrix(Mat& I)
   // accept only char type matrices
   CV_Assert(I.depth() == CV_8U);
 
-  MatIterator_<Vec3b> it, end;
-  for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
-  {
-    r = (*it)[0];
-    g = (*it)[1];
-    b = (*it)[2];
-    z = z_generator(r, g, b);
-    curr_y = (i - 1) / width;
-    curr_x = (i - 1) % width;
-    g_matrix[curr_y][curr_x][0] = r;
-    g_matrix[curr_y][curr_x][1] = g;
-    g_matrix[curr_y][curr_x][2] = b;
-    g_matrix[curr_y][curr_x][3] = z;
+  int j, k;
 
-    /* (*it)[0] = table[(*it)[0]]; */
-    /* (*it)[1] = table[(*it)[1]]; */
-    /* (*it)[2] = table[(*it)[2]]; */
+  int startX = 0;
+  int startY = g_numrows * mpi_myrank;
+  int endX = I.cols;
+  int endY = startY + g_numrows;
+
+  //MatIterator_<Vec3b> it, end;
+  //for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  for(j=startY; j<endY; j++) {
+    for(k=startX; k<endX; k++)
+      {
+	Vec3b it = I.at<Vec3b>(j,k);
+	r = (it)[0];
+	g = (it)[1];
+	b = (it)[2];
+	z = z_generator(r, g, b);
+	curr_y = (i - 1) / width;
+	curr_x = (i - 1) % width;
+	g_matrix[curr_y][curr_x][0] = r;
+	g_matrix[curr_y][curr_x][1] = g;
+	g_matrix[curr_y][curr_x][2] = b;
+	g_matrix[curr_y][curr_x][3] = z;
+
+	/* (*it)[0] = table[(*it)[0]]; */
+	/* (*it)[1] = table[(*it)[1]]; */
+	/* (*it)[2] = table[(*it)[2]]; */
+	i++;
+      }
   }
 }
 
@@ -281,7 +291,7 @@ void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
 /* Function: Save Image ****************************************************/
 /***************************************************************************/
 
-Mat& save_img(Mat& I)
+Mat& save_img(Mat& I, int mpi_myrank)
 {
   unsigned int curr_x = 0;
   unsigned int curr_y = 0;
@@ -289,15 +299,25 @@ Mat& save_img(Mat& I)
   // accept only char type matrices
   CV_Assert(I.depth() == CV_8U);
 
-  MatIterator_<Vec3b> it, end;
-  for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  int j,k;
+  int startX = 0;
+  int startY = g_numrows * mpi_myrank;
+  int endX = I.cols;
+  int endY = startY + g_numrows - 1;
+
+  //MatIterator_<Vec3b> it, end;
+  //for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  for(j=startY; j<endY; j++) {
+    for(k=startX; k<endX; k++)
   {
     curr_y = (i - 1) / width;
     curr_x = (i - 1) % width;
-
-    (*it)[0] = g_matrix[curr_y][curr_x][0];
-    (*it)[1] = g_matrix[curr_y][curr_x][1];
-    (*it)[2] = g_matrix[curr_y][curr_x][2];
+    Vec3b &it = I.at<Vec3b>(j,k);
+    (it)[0] = g_matrix[curr_y][curr_x][0];
+    (it)[1] = g_matrix[curr_y][curr_x][1];
+    (it)[2] = g_matrix[curr_y][curr_x][2];
+    i++;
+  }
   }
 
   return I;
