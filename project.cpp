@@ -7,6 +7,7 @@
 #include <math.h>
 #include <cv.h>
 #include <highgui.h>
+#include <mpi.h>
 
 // Because I'm sick of typing cv::
 using namespace cv;
@@ -26,6 +27,9 @@ unsigned int width = 0;
 unsigned int g_start_row = 0;
 unsigned int g_end_row = 0;
 
+unsigned int g_numrows=0;
+int g_numworkers=0;
+
 unsigned int g_output_type = 1;
 
 Mat img;
@@ -44,9 +48,12 @@ Mat& save_img(Mat&); // Store the data from the matrix back into the image
 /* Function: Main **********************************************************/
 /***************************************************************************/
 
-int main(int argc, char *argv[])
+int main(int argc, char *argv[]) 
 {
-  /* int i,j,k; */
+
+  int mpi_myrank;
+  int mpi_commsize;
+  double starttime, endtime;
 
   if(argc<3){
     printf("Usage: main <image-file-name> <output-file-name>\n\7");
@@ -60,26 +67,46 @@ int main(int argc, char *argv[])
     exit(0);
   }
 
+  MPI_Init( &argc, &argv);
+  MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
+  MPI_Comm_rank( MPI_COMM_WORLD, &mpi_myrank);
+  starttime = MPI_Wtime();
+  
+  g_numworkers = mpi_commsize;
+
   // get the image data
   height    = img.rows;
   width     = img.cols;
 
-  /* std::cout << z_generator(0,255,255) << std::endl; */
+  // Calculate number of rows for each rank
+  int averow = height/g_numworkers;
+  int extra = height%g_numworkers;
+  g_numrows = (mpi_myrank < extra) ? averow+1 : averow;  
+
+  MPI_Barrier( MPI_COMM_WORLD );
+
   g_matrix = allocate_matrix(height, width, 4);
-  /* g_matrix[height - 1][width - 1][3] = 12; */
-  /* std::cout << g_matrix[height - 1][width - 1][3] << std::endl; */
   init_matrix(img);
-  quicksort_serial(0, height*width - 1);
-  /* for (unsigned int i = 0; i < height; i++) */
-  /* { */
-  /*   for (unsigned int j = 0; j < width; j++) */
-  /*   { */
-  /*     std::cout << "(" << g_matrix[i][j][0] << ", " << g_matrix[i][j][1] << ", " << g_matrix[i][j][2] << ") z = " << g_matrix[i][j][3] << std::endl; */
-  /*   } */
-  /* } */
+
+  //unsigned int i = g_numrows * width * mpi_myrank;
+  //unsigned int j = i + (g_numrows - 1)*width;  
+  //quicksort_serial(0, height*width - 1);
+  quicksort_serial(g_numrows * width * mpi_myrank,
+		   (g_numrows * width * mpi_myrank) + (g_numrows-1) * width);
   
   img = save_img(img);
-  imwrite(argv[2], img);
+  if(mpi_myrank == 0)
+    imwrite(argv[2], img);
+
+  MPI_Barrier( MPI_COMM_WORLD );
+
+  endtime = MPI_Wtime();
+  MPI_Finalize();
+
+  if(mpi_myrank == 0) {
+    printf("That took %f seconds\n",endtime-starttime);
+  }
+
 
   return 0;
 }
@@ -199,7 +226,10 @@ void init_matrix(Mat& I)
 // http://www.algolist.net/Algorithms/Sorting/Quicksort
 void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
 {
+  // left = 0, right = height*width
+  
   unsigned int i = left_bound, j = right_bound;
+  
   unsigned int tmp_r, tmp_g, tmp_b, tmp_z;
   unsigned int middle = (left_bound + right_bound) / 2;
   unsigned int pivot = g_matrix[middle / width][middle % width][3];
