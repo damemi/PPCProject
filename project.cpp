@@ -93,7 +93,10 @@ int main(int argc, char *argv[])
   quicksort_serial(0, g_numrows*width-1);
   
   img = save_img(img,mpi_myrank);
-  if(mpi_myrank == 0)
+
+  // This changes which rank actually writes, this will eventually be
+  // a loop or something for all ranks to combine back together
+  if(mpi_myrank == 1)
     imwrite(argv[2], img);
 
   MPI_Barrier( MPI_COMM_WORLD );
@@ -303,7 +306,7 @@ Mat& save_img(Mat& I, int mpi_myrank)
   int startX = 0;
   int startY = g_numrows * mpi_myrank;
   int endX = I.cols;
-  int endY = startY + g_numrows - 1;
+  int endY = startY + g_numrows;
 
   //MatIterator_<Vec3b> it, end;
   //for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
