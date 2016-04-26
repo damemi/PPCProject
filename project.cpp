@@ -64,10 +64,6 @@ int main(int argc, char *argv[])
   height    = img.rows;
   width     = img.cols;
 
-  // create a window
-  /* namedWindow("mainWin", CV_WINDOW_AUTOSIZE); */ 
-  /* cvMoveWindow("mainWin", 100, 100); */
-
   /* std::cout << z_generator(0,255,255) << std::endl; */
   g_matrix = allocate_matrix(height, width, 4);
   /* g_matrix[height - 1][width - 1][3] = 12; */
@@ -84,12 +80,6 @@ int main(int argc, char *argv[])
   
   img = save_img(img);
   imwrite(argv[2], img);
-
-  /* // show the image */
-  /* imshow("mainWin", img); */
-
-  /* // wait for a key */
-  /* waitKey(0); */
 
   return 0;
 }
