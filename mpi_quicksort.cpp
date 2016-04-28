@@ -1,6 +1,8 @@
 #include <iostream>
 #include <sys/time.h>
 #include <mpi.h>
+#include <stdio.h>
+#include <stdlib.h>
 using namespace std;
 
 void swap(int *data, int i, int j) {
@@ -92,6 +94,10 @@ int main(int argc, char *argv[]) {
   // Perform local sort
   quicksort(data, 0, localDataSize);
 
+  if(rank == 0) {
+    for(unsigned int q=0;q<length;q++)
+      printf("%d\n",data[q]);
+  }
   // Measure elapsed time
   gettimeofday(&end, 0);
   if (rank == 0)

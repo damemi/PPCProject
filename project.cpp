@@ -31,6 +31,7 @@ unsigned int g_numrows=0;
 int g_numworkers=0;
 
 unsigned int g_output_type = 1;
+int g_mpi_myrank;
 
 Mat img;
 
@@ -43,6 +44,10 @@ unsigned int z_generator(unsigned int, unsigned int, unsigned int); // A helper 
 void init_matrix(Mat&,int); // Take data from the image and store it to our rows
 void quicksort_serial(unsigned int, unsigned int);
 Mat& save_img(Mat&,int); // Store the data from the matrix back into the image
+
+void swap(int, int);
+int partition(int, int);
+void quicksort(int, int);
 
 /***************************************************************************/
 /* Function: Main **********************************************************/
@@ -73,7 +78,7 @@ int main(int argc, char *argv[])
   starttime = MPI_Wtime();
   
   g_numworkers = mpi_commsize;
-
+  g_mpi_myrank = mpi_myrank;
   // get the image data
   height    = img.rows;
   width     = img.cols;
@@ -85,19 +90,76 @@ int main(int argc, char *argv[])
 
   MPI_Barrier( MPI_COMM_WORLD );
 
-  //g_matrix = allocate_matrix(height, width, 4);
-  g_matrix = allocate_matrix(g_numrows, width, 4);
+  g_matrix = allocate_matrix(height, width, 4);
+  //g_matrix = allocate_matrix(g_numrows, width, 4);
   init_matrix(img,mpi_myrank);
 
-  //quicksort_serial(0, height*width - 1);
-  quicksort_serial(0, g_numrows*width-1);
+  //quicksort(0, height*width - 1);
+  //quicksort(0,g_numrows*width-1);
+
+
+  //////
+  // Start parallel stuff
+  /////
+  int i;
+  int length = g_numrows*width*4; // length of contiguous data array
+  MPI_Status status;
+  // Send all of the data to processor 0
+  if (mpi_myrank == 0) {
+    for (i=1; i<g_numworkers; i++)
+      MPI_Recv(&(g_matrix[0][0][0])+i*length, length, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+  }
+  else {
+    MPI_Send(&(g_matrix[0][0][0]), g_numrows*width*4, MPI_INT, 0, 0, MPI_COMM_WORLD);
+  }
+
+  int s;
+  //int localDataSize = g_numrows*width;
+  int localDataSize = height*width;
+  int pivot;
+  for (s=g_numworkers; s > 1; s /= 2) {
+    if (mpi_myrank % s == 0) {
+      pivot = partition(0, localDataSize-1);
+
+      // Send everything after the pivot to processor rank + s/2 and keep up to the pivot
+      MPI_Send(&(g_matrix[0][0][0])+pivot*4, localDataSize*4-pivot*4, MPI_INT, mpi_myrank + s/2, 0, MPI_COMM_WORLD);
+      localDataSize = pivot;
+    }
+    else if (mpi_myrank % s == s/2) {
+      // Get data from processor rank - s/2
+      MPI_Recv(&(g_matrix[0][0][0]), localDataSize*4, MPI_INT, mpi_myrank - s/2, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
+
+      // How much data did we really get?
+      MPI_Get_count(&status, MPI_INT, &localDataSize);
+      localDataSize /= 4;
+    }
+  }
+
+  //quicksort(0, g_numrows*width-1);
+  quicksort(0, localDataSize-1);
+
+  if(mpi_myrank==0) {
+    unsigned int p,q,z=0;
+    for(p=0;p<localDataSize/width;p++) {
+      for(q=0;q<localDataSize%width;q++) {
+	printf("%d %d\n",g_matrix[p][q][3], z);
+	z++;
+      }
+    }
+  }
+  //////////
+  // End parallel stuff
+  //////////
   
   img = save_img(img,mpi_myrank);
 
-  // This changes which rank actually writes, this will eventually be
-  // a loop or something for all ranks to combine back together
-  if(mpi_myrank == 1)
-    imwrite(argv[2], img);
+
+  std::ostringstream stream;
+  stream << mpi_myrank << argv[2];
+  std::string outputName = stream.str();
+  //if(mpi_myrank == 0)
+    //imwrite(argv[2], img);
+  imwrite(outputName,img);
 
   MPI_Barrier( MPI_COMM_WORLD );
 
@@ -116,6 +178,60 @@ int main(int argc, char *argv[])
 /***************************************************************************/
 /* Other Functions *********************************************************/
 /***************************************************************************/
+
+void swap(int i, int j) {
+  unsigned int tmp_r, tmp_g, tmp_b, tmp_z;
+  tmp_r = g_matrix[i / width][i % width][0];
+  tmp_g = g_matrix[i / width][i % width][1];
+  tmp_b = g_matrix[i / width][i % width][2];
+  tmp_z = g_matrix[i / width][i % width][3];
+  g_matrix[i / width][i % width][0] = g_matrix[j / width][j % width][0];
+  g_matrix[i / width][i % width][1] = g_matrix[j / width][j % width][1];
+  g_matrix[i / width][i % width][2] = g_matrix[j / width][j % width][2];
+  g_matrix[i / width][i % width][3] = g_matrix[j / width][j % width][3];
+  g_matrix[j / width][j % width][0] = tmp_r;
+  g_matrix[j / width][j % width][1] = tmp_g;
+  g_matrix[j / width][j % width][2] = tmp_b;
+  g_matrix[j / width][j % width][3] = tmp_z;
+}
+
+int partition(int start, int end) {
+  if (start >= end) return 0;
+  int middle = (start + end) / 2;
+  unsigned int pivotValue = g_matrix[middle / width][middle % width][3];
+  //unsigned int pivotValue = g_matrix[start / width][start % width][3];
+  int low = start;
+  int high = end;
+
+  while (low <= high) {
+    while (g_matrix[low/width][low%width][3] <= pivotValue && low < end) {
+      low++;
+    }
+    while (g_matrix[high/width][high%width][3] > pivotValue && high > start) {
+      high--;
+    }
+    if (low <= high) { 
+      swap(low, high);
+      low++;
+      high--;
+    }
+  }
+
+  swap(start, high);
+
+  return high;
+}
+
+void quicksort(int start, int end) {
+  if  (end-start+1 < 2) return;
+  int pivot = partition(start, end);
+  if(start < pivot)
+    quicksort(start, pivot);
+  if(pivot+1 < end)
+    quicksort(pivot+1, end);
+}
+
+
 
 /***************************************************************************/
 /* Function: Allocate Matrix ***********************************************/
@@ -240,13 +356,11 @@ void init_matrix(Mat& I, int mpi_myrank)
 void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
 {
   // left = 0, right = height*width
-  
   unsigned int i = left_bound, j = right_bound;
   
   unsigned int tmp_r, tmp_g, tmp_b, tmp_z;
   unsigned int middle = (left_bound + right_bound) / 2;
   unsigned int pivot = g_matrix[middle / width][middle % width][3];
-
   /* partition */
 
   while (i < j)
@@ -275,11 +389,11 @@ void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
       g_matrix[j / width][j % width][3] = tmp_z;
       i++;
       j--;
+  //871 870 869 871
     }
-  };
+  }
 
   /* recursion */
-
   if (left_bound < j)
   {
     quicksort_serial(left_bound, j);
@@ -288,6 +402,9 @@ void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
   {
     quicksort_serial(i, right_bound);
   }
+  //  if(g_mpi_myrank==0)
+  //printf("%d %d %d %d\n",i,j,left_bound,right_bound);
+
 }
 
 /***************************************************************************/
