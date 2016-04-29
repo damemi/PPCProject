@@ -4,3 +4,4 @@
 vgcore* # Valgrind binaries
 *.png # Images
 *.jpg
+*.txt
