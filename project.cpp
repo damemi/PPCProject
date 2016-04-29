@@ -5,12 +5,9 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
-#include <cv.h>
-#include <highgui.h>
 #include <mpi.h>
-
-// Because I'm sick of typing cv::
-using namespace cv;
+#include <iostream>
+#include <fstream>
 
 /***************************************************************************/
 /* Global Vars *************************************************************/
@@ -33,7 +30,7 @@ int g_numworkers=0;
 unsigned int g_output_type = 1;
 int g_mpi_myrank;
 
-Mat img;
+FILE* img;
 
 /***************************************************************************/
 /* Function Decs ***********************************************************/
@@ -41,9 +38,9 @@ Mat img;
 
 unsigned int ***allocate_matrix(unsigned int, unsigned int, unsigned int); // Allocate space for the matrix
 unsigned int z_generator(unsigned int, unsigned int, unsigned int); // A helper function to calculate the z-curve value given RGB values
-void init_matrix(Mat&,int); // Take data from the image and store it to our rows
+void init_matrix(FILE*, int); // Take data from the image and store it to our rows
 void quicksort_serial(unsigned int, unsigned int);
-Mat& save_img(Mat&,int,int); // Store the data from the matrix back into the image
+void save_img(char*, int, int); // Store the data from the matrix back into the image
 
 void swap(int, int);
 int partition(int, int);
@@ -66,11 +63,13 @@ int main(int argc, char *argv[])
   }
 
   // load an image  
-  img = imread(argv[1], CV_LOAD_IMAGE_COLOR);
-  if(!img.data){
-    printf("Could not load image file: %s\n",argv[1]);
-    exit(0);
-  }
+  /* img = imread(argv[1], CV_LOAD_IMAGE_COLOR); */
+  /* if(!img.data){ */
+  /*   printf("Could not load image file: %s\n",argv[1]); */
+  /*   exit(0); */
+  /* } */
+  img = fopen(argv[1], "r+");
+  fscanf(img, "%d %d\n", &width, &height);
 
   MPI_Init( &argc, &argv);
   MPI_Comm_size( MPI_COMM_WORLD, &mpi_commsize);
@@ -80,8 +79,8 @@ int main(int argc, char *argv[])
   g_numworkers = mpi_commsize;
   g_mpi_myrank = mpi_myrank;
   // get the image data
-  height    = img.rows;
-  width     = img.cols;
+  /* height    = img.rows; */
+  /* width     = img.cols; */
 
   // Calculate number of rows for each rank
   int averow = height/g_numworkers;
@@ -152,15 +151,7 @@ int main(int argc, char *argv[])
   // End parallel stuff
   //////////
   
-  img = save_img(img,mpi_myrank,localDataSize);
-
-
-  std::ostringstream stream;
-  stream << mpi_myrank << argv[2];
-  std::string outputName = stream.str();
-  //if(mpi_myrank == 0)
-    //imwrite(argv[2], img);
-  imwrite(outputName,img);
+  save_img(argv[2], mpi_commsize, localDataSize);
 
   MPI_Barrier( MPI_COMM_WORLD );
 
@@ -307,31 +298,37 @@ unsigned int z_generator(unsigned int R, unsigned int G, unsigned int B)
 /* Function: Init Matrix ***************************************************/
 /***************************************************************************/
 
-void init_matrix(Mat& I, int mpi_myrank)
+void init_matrix(FILE* I, int mpi_myrank)
 {
   unsigned int curr_x = 0;
   unsigned int curr_y = 0;
   unsigned int i = 1;
   unsigned int r, g, b, z;
-  // accept only char type matrices
-  CV_Assert(I.depth() == CV_8U);
 
   int j, k;
 
   int startX = 0;
   int startY = g_numrows * mpi_myrank;
-  int endX = I.cols;
+  int endX = width; // number of cols
   int endY = startY + g_numrows;
+  
+  fscanf(I, "%*d %*d\n"); // First two are height / width; not needed for any part of the matrix
 
-  //MatIterator_<Vec3b> it, end;
-  //for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
+  for(int c = 0; c < startY; c++)
+  {
+    for(int d = 0; d < startX; d++)
+    {
+      for(int e = 0; e <= 3; e++)
+      {
+	fscanf(I, "%*d %*d %*d");
+      }
+    }
+  }
+
   for(j=startY; j<endY; j++) {
     for(k=startX; k<endX; k++)
       {
-	Vec3b it = I.at<Vec3b>(j,k);
-	r = (it)[0];
-	g = (it)[1];
-	b = (it)[2];
+	fscanf(I, "%d %d %d", &r, &g, &b);
 	z = z_generator(r, g, b);
 	curr_y = (i - 1) / width;
 	curr_x = (i - 1) % width;
@@ -412,37 +409,43 @@ void quicksort_serial(unsigned int left_bound, unsigned int right_bound)
 /* Function: Save Image ****************************************************/
 /***************************************************************************/
 
-Mat& save_img(Mat& I, int mpi_myrank, int localDataSize)
+void save_img(char* filename, int commsize, int localDataSize)
 {
+  std::ofstream myfile;
   unsigned int curr_x = 0;
   unsigned int curr_y = 0;
-  unsigned int i = 1;
-  // accept only char type matrices
-  CV_Assert(I.depth() == CV_8U);
 
   int j,k;
   int startX = 0;
   //int startY = g_numrows * mpi_myrank;
   int startY = 0;
-  int endX = I.cols;
+  int endX = width; // Equal to the number of columns
   //int endY = startY + g_numrows;
-  int endY = localDataSize /width;
+  /* std::cout << "localDataSize = " << localDataSize << " width = " << width << std::endl; */
+  int endY = localDataSize / width;
   
-
-  //MatIterator_<Vec3b> it, end;
-  //for( it = I.begin<Vec3b>(), end = I.end<Vec3b>(); it != end; ++it, i++)
-  for(j=startY; j<endY; j++) {
-    for(k=startX; k<endX; k++)
+  for (int I = 0; I < commsize; I++)
+  {
+    if (g_mpi_myrank == I)
+    {
+      myfile.open(filename);
+      if (I == 0) // Have to put width x height first
       {
-	curr_y = (i - 1) / width;
-	curr_x = (i - 1) % width;
-	Vec3b &it = I.at<Vec3b>(j,k);
-	(it)[0] = g_matrix[curr_y][curr_x][0];
-	(it)[1] = g_matrix[curr_y][curr_x][1];
-	(it)[2] = g_matrix[curr_y][curr_x][2];
-	i++;
+	myfile << width << " " << height << "\n";
       }
+      unsigned int i = 1;
+      for(j=startY; j<endY; j++)
+      {
+	for(k=startX; k<endX; k++)
+	{
+	  curr_y = (i - 1) / width;
+	  curr_x = (i - 1) % width;
+	  myfile << g_matrix[curr_y][curr_x][0] << " " << g_matrix[curr_y][curr_x][1] << " " << g_matrix[curr_y][curr_x][2] << " ";
+	  i++;
+	}
+      }
+      myfile.close();
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
   }
-
-  return I;
 }
