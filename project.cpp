@@ -428,10 +428,16 @@ void save_img(char* filename, int commsize, int localDataSize)
   {
     if (g_mpi_myrank == I)
     {
-      myfile.open(filename);
       if (I == 0) // Have to put width x height first
       {
-	myfile << width << " " << height << "\n";
+	myfile.open(filename); // Start a file
+	myfile << width << " " << height << std::endl;
+	/* std::cout << "this should have added a newline" << std::endl; */
+	/* std::cout << "width = " << width << std::endl; */
+      }
+      else
+      {
+	myfile.open(filename, std::ofstream::app);
       }
       unsigned int i = 1;
       for(j=startY; j<endY; j++)

@@ -70,5 +70,6 @@ void decode(char* img_file_name, char* txt_file_name)
 		/* std::cout << "a = " << (unsigned int)(*it)[0] << " b = " << (unsigned int)(*it)[1] << " c = " << (unsigned int)(*it)[2] << std::endl; */
 		it++;
 	}
+	fclose(myfile);
 	imwrite(img_file_name, img);
 }
