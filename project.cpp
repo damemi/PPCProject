@@ -99,11 +99,11 @@ int main(int argc, char *argv[])
 
   //////
   // Start parallel stuff
+  // Based on examples of MPI sorting found at http://dehn.slu.edu/courses/spring09/493/
   /////
   int i;
   int length = g_numrows*width*4; // length of contiguous data array
   MPI_Status status;
-  // Send all of the data to processor 0
   if (mpi_myrank == 0) {
     for (i=1; i<g_numworkers; i++)
       MPI_Recv(&(g_matrix[0][0][0])+i*length, length, MPI_INT, i, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
@@ -119,16 +119,12 @@ int main(int argc, char *argv[])
   for (s=g_numworkers; s > 1; s /= 2) {
     if (mpi_myrank % s == 0) {
       pivot = partition(0, localDataSize-1);
-
-      // Send everything after the pivot to processor rank + s/2 and keep up to the pivot
       MPI_Send(&(g_matrix[0][0][0])+pivot*4, localDataSize*4-pivot*4, MPI_INT, mpi_myrank + s/2, 0, MPI_COMM_WORLD);
       localDataSize = pivot;
     }
     else if (mpi_myrank % s == s/2) {
-      // Get data from processor rank - s/2
       MPI_Recv(&(g_matrix[0][0][0]), localDataSize*4, MPI_INT, mpi_myrank - s/2, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
-      // How much data did we really get?
       MPI_Get_count(&status, MPI_INT, &localDataSize);
       localDataSize /= 4;
     }
